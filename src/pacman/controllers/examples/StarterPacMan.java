@@ -21,7 +21,9 @@ public class StarterPacMan extends Controller<MOVE>
 	private static final int MIN_DISTANCE=20;	//if a ghost is this close, run away
 	
 	public MOVE getMove(Game game,long timeDue)
-	{			
+	{
+		game.afficherJunctions(game);
+		game.afficherClosestJunctions(game);
 		int current=game.getPacmanCurrentNodeIndex();
 		
 		//Strategy 1: if any non-edible ghost is too close (less than MIN_DISTANCE), run away

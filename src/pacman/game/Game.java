@@ -1,8 +1,8 @@
 package pacman.game;
 
-import java.util.BitSet;
-import java.util.EnumMap;
-import java.util.Random;
+import java.awt.*;
+import java.util.*;
+import java.util.List;
 import java.util.Map.Entry;
 import pacman.game.Constants.DM;
 import pacman.game.Constants.MOVE;
@@ -11,6 +11,8 @@ import pacman.game.internal.Maze;
 import pacman.game.internal.Node;
 import pacman.game.internal.PacMan;
 import pacman.game.internal.PathsCache;
+import java.awt.Color;
+
 
 import static pacman.game.Constants.*;
 
@@ -93,6 +95,32 @@ public final class Game {
 		rnd = new Random(seed);
 
 		_init(0);
+	}
+
+	// À ajouter dans la classe Game
+	public HashMap<String, String> getGameStateAsMap() {
+		HashMap<String, String> state = new HashMap<>();
+		state.put("mazeIndex", String.valueOf(mazeIndex));
+		state.put("totalTime", String.valueOf(totalTime));
+		state.put("score", String.valueOf(score));
+		state.put("currentLevelTime", String.valueOf(currentLevelTime));
+		state.put("levelCount", String.valueOf(levelCount));
+		state.put("pacman.currentNodeIndex", String.valueOf(pacman.currentNodeIndex));
+		state.put("pacman.lastMoveMade", String.valueOf(pacman.lastMoveMade));
+		state.put("pacman.numberOfLivesRemaining", String.valueOf(pacman.numberOfLivesRemaining));
+		state.put("pacman.hasReceivedExtraLife", String.valueOf(pacman.hasReceivedExtraLife));
+		state.put("timeOfLastGlobalReversal", String.valueOf(timeOfLastGlobalReversal));
+		state.put("pacmanWasEaten", String.valueOf(pacmanWasEaten));
+		// Ajoutez d'autres états pertinents
+
+		// État des fantômes
+		for(GHOST ghost : GHOST.values()) {
+			state.put("ghost." + ghost + ".currentNodeIndex", String.valueOf(ghosts.get(ghost).currentNodeIndex));
+			state.put("ghost." + ghost + ".edibleTime", String.valueOf(ghosts.get(ghost).edibleTime));
+			state.put("ghost." + ghost + ".lastMoveMade", String.valueOf(ghosts.get(ghost).lastMoveMade));
+		}
+
+		return state;
 	}
 
 	/**
@@ -181,6 +209,222 @@ public final class Game {
 		pills.set(0, currentMaze.pillIndices.length);
 		powerPills = new BitSet(currentMaze.powerPillIndices.length);
 		powerPills.set(0, currentMaze.powerPillIndices.length);
+	}
+
+	public void afficherJunctions(Game game) {
+		int[] junctionIndices = game.getJunctionIndices(); // Récupère les indices des nœuds de jonction
+
+		// Parcourt chaque nœud de jonction et dessine un point rouge
+		for (int junction : junctionIndices) {
+			GameView.addPoints(game, Color.RED, junction);
+		}
+	}
+
+	/**
+	 * Retourne les nœuds de jonction directement atteignables par PacMan.
+	 * Une jonction est directement atteignable si PacMan peut y arriver sans
+	 * passer par une autre jonction.
+	 *
+	 * @return Les indices des jonctions directement atteignables
+	 */
+	public int getClosestJunctionIndex(int fromNodeIndex) {
+	    int[] junctionIndices = getJunctionIndices(); // Récupère les indices des jonctions
+	    int closestJunction = -1;
+	    double minDistance = Double.MAX_VALUE;
+
+	    for (int junctionIndex : junctionIndices) {
+	        double distance = getShortestPathDistance(fromNodeIndex, junctionIndex);
+
+	        if (distance < minDistance) {
+	            minDistance = distance;
+	            closestJunction = junctionIndex;
+	        }
+	    }
+
+	    return closestJunction;
+	}
+
+	/**
+	 * Méthode auxiliaire permettant de spécifier le nœud précédent.
+	 *
+	 * @param currentNodeIndex Nœud actuel de PacMan
+	 * @param previousNodeIndex Nœud précédent de PacMan
+	 * @return Les indices des jonctions directement atteignables
+	 */
+	public int[] getClosestJunctionIndices(int currentNodeIndex, int previousNodeIndex) {
+		Set<Integer> junctions = new HashSet<>();
+
+		// Si PacMan est déjà sur une jonction
+		if (isJunction(currentNodeIndex)) {
+			return new int[]{currentNodeIndex};
+		}
+
+		// Pour chaque direction possible
+		for (MOVE initialMove : getPossibleMoves(currentNodeIndex)) {
+			int nextNodeIndex = getNeighbour(currentNodeIndex, initialMove);
+
+			// Ne pas revenir en arrière
+			if (nextNodeIndex == previousNodeIndex) {
+				continue;
+			}
+
+			// Parcours jusqu'à trouver une jonction
+			Stack<Integer> nodeStack = new Stack<>();
+			Stack<Integer> prevStack = new Stack<>();
+			Set<Integer> visited = new HashSet<>();
+
+			nodeStack.push(nextNodeIndex);
+			prevStack.push(currentNodeIndex);
+			visited.add(currentNodeIndex);
+			visited.add(nextNodeIndex);
+
+			while (!nodeStack.isEmpty()) {
+				int node = nodeStack.pop();
+				int prev = prevStack.pop();
+
+				// Si c'est une jonction, on l'ajoute et on passe au prochain chemin
+				if (isJunction(node)) {
+					junctions.add(node);
+					continue;
+				}
+
+				// Explorer les voisins
+				for (MOVE move : getPossibleMoves(node)) {
+					int neighbor = getNeighbour(node, move);
+
+					// Ne pas revenir en arrière et ne pas revisiter les nœuds
+					if (neighbor != prev && !visited.contains(neighbor)) {
+						nodeStack.push(neighbor);
+						prevStack.push(node);
+						visited.add(neighbor);
+					}
+				}
+			}
+		}
+
+		// Convertir l'ensemble en tableau
+		int[] result = new int[junctions.size()];
+		int i = 0;
+		for (int junction : junctions) {
+			result[i++] = junction;
+		}
+
+		return result;
+	}
+
+	public void afficherClosestJunctions(Game game) {
+		int[] closestJunctions = game.getClosestJunctionIndices(game.getPacmanCurrentNodeIndex(), -1); // Récupère les indices des jonctions atteignables
+
+		// Parcourt chaque jonction atteignable et dessine un point bleu
+		for (int junction : closestJunctions) {
+			GameView.addPoints(game, Color.BLUE, junction);
+		}
+	}
+
+
+	/**
+	 * Calcule le plus court chemin entre deux nœuds en utilisant l'algorithme A*
+	 * avec la métrique euclidienne comme heuristique.
+	 *
+	 * @param fromNodeIndex Le nœud de départ
+	 * @param toNodeIndex Le nœud d'arrivée
+	 * @return Un tableau d'indices de nœuds représentant le chemin trouvé
+	 */
+	public int[] getAStarPathEuclidean(int fromNodeIndex, int toNodeIndex) {
+		// Cas particuliers
+		if (fromNodeIndex == toNodeIndex) {
+			return new int[]{fromNodeIndex};
+		}
+
+		// Structure pour stocker les nœuds à explorer (liste ouverte)
+		PriorityQueue<AStarNode> openList = new PriorityQueue<>();
+		// Structure pour stocker les nœuds déjà explorés (liste fermée)
+		Set<Integer> closedList = new HashSet<>();
+		// Pour reconstruire le chemin à la fin
+		Map<Integer, Integer> cameFrom = new HashMap<>();
+		// Coût réel pour atteindre chaque nœud depuis le départ
+		Map<Integer, Double> gScore = new HashMap<>();
+
+		// Initialisation
+		gScore.put(fromNodeIndex, 0.0);
+		openList.add(new AStarNode(fromNodeIndex, 0.0, getEuclideanDistance(fromNodeIndex, toNodeIndex)));
+
+		while (!openList.isEmpty()) {
+			// Obtenir le nœud avec le coût total le plus bas
+			AStarNode current = openList.poll();
+
+			// Si c'est la destination, reconstruire le chemin et le retourner
+			if (current.nodeIndex == toNodeIndex) {
+				return reconstructPath(cameFrom, current.nodeIndex);
+			}
+
+			// Marquer le nœud comme exploré
+			closedList.add(current.nodeIndex);
+
+			// Explorer tous les voisins
+			for (MOVE move : getPossibleMoves(current.nodeIndex)) {
+				int neighbor = getNeighbour(current.nodeIndex, move);
+
+				// Ignorer les voisins invalides ou déjà explorés
+				if (neighbor == -1 || closedList.contains(neighbor)) {
+					continue;
+				}
+
+				// Calculer le nouveau gScore pour ce voisin
+				double tentativeGScore = gScore.get(current.nodeIndex) + 1; // Coût de 1 pour chaque déplacement
+
+				// Si ce chemin vers le voisin est meilleur que tous les précédents
+				if (!gScore.containsKey(neighbor) || tentativeGScore < gScore.get(neighbor)) {
+					// Mettre à jour les informations pour ce voisin
+					cameFrom.put(neighbor, current.nodeIndex);
+					gScore.put(neighbor, tentativeGScore);
+
+					// Ajouter à la liste ouverte avec le fScore = gScore + heuristique
+					double fScore = tentativeGScore + getEuclideanDistance(neighbor, toNodeIndex);
+					openList.add(new AStarNode(neighbor, tentativeGScore, fScore));
+				}
+			}
+		}
+
+		// Aucun chemin trouvé
+		return new int[0];
+	}
+
+	// Classe auxiliaire pour représenter un nœud dans l'algorithme A*
+	private class AStarNode implements Comparable<AStarNode> {
+		int nodeIndex;
+		double gScore;
+		double fScore;
+
+		public AStarNode(int nodeIndex, double gScore, double fScore) {
+			this.nodeIndex = nodeIndex;
+			this.gScore = gScore;
+			this.fScore = fScore;
+		}
+
+		@Override
+		public int compareTo(AStarNode other) {
+			return Double.compare(this.fScore, other.fScore);
+		}
+	}
+
+	// Méthode pour reconstruire le chemin à partir des nœuds précédents
+	private int[] reconstructPath(Map<Integer, Integer> cameFrom, int current) {
+		List<Integer> totalPath = new ArrayList<>();
+		totalPath.add(current);
+
+		while (cameFrom.containsKey(current)) {
+			current = cameFrom.get(current);
+			totalPath.add(0, current);
+		}
+
+		// Convertir la liste en tableau
+		int[] result = new int[totalPath.size()];
+		for (int i = 0; i < totalPath.size(); i++) {
+			result[i] = totalPath.get(i);
+		}
+
+		return result;
 	}
 
 	/**
